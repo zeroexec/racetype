@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
+import Image from 'next/image'
 import { supabase } from '@/lib/supabase'
 
 export default function Home() {
@@ -37,6 +38,18 @@ export default function Home() {
       <div className="absolute inset-0 bg-[linear-gradient(to_right,#1e293b15_1px,transparent_1px),linear-gradient(to_bottom,#1e293b15_1px,transparent_1px)] bg-[size:4rem_4rem] [mask-image:radial-gradient(ellipse_60%_50%_at_50%_50%,#000_70%,transparent_100%)]" />
       <div className="absolute -top-40 -left-40 w-96 h-96 bg-red-600/20 rounded-full blur-3xl animate-pulse" />
       <div className="absolute -bottom-40 -right-40 w-96 h-96 bg-rose-600/20 rounded-full blur-3xl animate-pulse" />
+
+      {/* Logo Transparan Samar di Background */}
+      <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-10 z-0">
+        <Image 
+          src="/logo/logo.png" 
+          alt="Type Race Logo Background" 
+          width={600} 
+          height={600} 
+          priority
+          className="object-contain filter grayscale"
+        />
+      </div>
 
       {/* Top Bar / Header Nav */}
       <header className="absolute top-0 left-0 right-0 p-6 flex justify-between items-center max-w-6xl mx-auto w-full z-10">
@@ -75,7 +88,7 @@ export default function Home() {
           </div>
 
           <h1 className="text-5xl md:text-6xl font-black tracking-tight text-transparent bg-clip-text bg-gradient-to-b from-white via-slate-200 to-slate-500 drop-shadow-sm">
-            TYPING<span className="text-red-500">RACE</span>
+            TYPE<span className="text-red-500">RACE</span>
           </h1>
 
           <p className="text-slate-400 text-sm md:text-base max-w-sm mx-auto font-light leading-relaxed">
@@ -88,7 +101,7 @@ export default function Home() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             
             {/* Tombol Kiri: Multiplayer (Fitur Mendatang) */}
-            <div className="group relative w-full py-4 px-6 bg-slate-900/50 border border-slate-800 text-slate-500 rounded-xl flex flex-col items-center justify-center gap-1 overflow-hidden shadow-inner cursor-not-allowed">
+            <div className="group relative w-full py-4 px-6 bg-slate-900/50 border border-slate-800 text-slate-500 rounded-xl flex flex-col items-center justify-center gap-1 overflow-hidden shadow-inner cursor-not-allowed backdrop-blur-sm">
               <div className="flex items-center gap-3">
                 <svg className="w-5 h-5 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
@@ -102,7 +115,7 @@ export default function Home() {
             <button
               onClick={handleStartBotRace}
               disabled={loading}
-              className="group relative w-full py-4 px-6 bg-red-600 hover:bg-red-500 active:scale-95 disabled:scale-100 borders border-red-700 hover:border-red-500 text-white font-bold text-sm tracking-wider uppercase rounded-xl transition-all duration-200 shadow-[0_0_30px_rgba(220,38,38,0.3)] hover:shadow-[0_0_50px_rgba(220,38,38,0.6)] flex items-center justify-center gap-3 overflow-hidden"
+              className="group relative w-full py-4 px-6 bg-red-600 hover:bg-red-500 active:scale-95 disabled:scale-100 border border-red-700 hover:border-red-500 text-white font-bold text-sm tracking-wider uppercase rounded-xl transition-all duration-200 shadow-[0_0_30px_rgba(220,38,38,0.3)] hover:shadow-[0_0_50px_rgba(220,38,38,0.6)] flex items-center justify-center gap-3 overflow-hidden"
             >
               {/* Glossy shine effect */}
               <div className="absolute inset-0 w-1/2 h-full bg-white/10 skew-x-12 -translate-x-full group-hover:translate-x-[300%] transition-transform duration-1000 ease-out" />
