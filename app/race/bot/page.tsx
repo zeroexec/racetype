@@ -81,7 +81,7 @@ function BotRaceContent() {
   // Inisialisasi Player & Load Data dari DB
   useEffect(() => {
     const storedUserId = localStorage.getItem('typing_race_user_id') || 'guest_user'
-    const rawUsername = localStorage.getItem('typing_race_username')
+    const rawUsername = localStorage.getItem('typing_race_username') || ''
 
     let finalUsername = rawUsername
     if (
@@ -184,7 +184,7 @@ function BotRaceContent() {
     }))
   }
 
-  // Timer Countdown Start (DIPERBAIKI)
+  // Timer Countdown Start
   useEffect(() => {
     if (isLoading) return
 
@@ -193,7 +193,6 @@ function BotRaceContent() {
         const timer = setTimeout(() => setRaceCountdown((prev) => prev - 1), 1000)
         return () => clearTimeout(timer)
       } else {
-        // Tampilkan "MULAI!" selama 800ms sebelum mode balapan dimulai
         const startTimer = setTimeout(() => {
           setGameState('racing')
           setStartTime(Date.now())
