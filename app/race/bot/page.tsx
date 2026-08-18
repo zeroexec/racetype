@@ -56,7 +56,7 @@ function BotRaceContent() {
 
   const passageWords = passageText ? passageText.split(' ') : []
 
-  // Menentukan indeks kata yang sedang aktif dengan akurat
+  // Menentukan indeks kata yang sedang aktif dengan akurat untuk user
   const getCurrentWordIndex = () => {
     if (!passageText || !inputText) return 0
     const slicedPassage = passageText.slice(0, inputText.length)
@@ -65,7 +65,7 @@ function BotRaceContent() {
 
   const currentWordIndex = getCurrentWordIndex()
 
-  // Auto-scroll horizontal ke kata aktif
+  // Auto-scroll horizontal ke kata aktif user
   useEffect(() => {
     if (containerRef.current && wordRefs.current[currentWordIndex]) {
       const container = containerRef.current
@@ -360,7 +360,19 @@ function BotRaceContent() {
     }
   }
 
-  // Rendering Teks Lintasan Ketik
+  // Peta indeks karakter aktif untuk semua pemain (user + bot)
+  const playerCharPositions = players.map((p) => {
+    if (!p.isBot) {
+      return { id: p.id, index: inputText.length, isMe: true }
+    }
+    const charIdx = Math.min(
+      Math.floor((p.progress / 100) * passageText.length),
+      passageText.length - 1
+    )
+    return { id: p.id, index: charIdx, isMe: false }
+  })
+
+  // Rendering Teks Lintasan Ketik dengan Garis Tipis Indikator Posisi
   const renderPassage = () => {
     let globalCharIndex = 0
     return passageWords.map((word, wordIdx) => {
@@ -371,9 +383,15 @@ function BotRaceContent() {
         if (index < inputText.length) {
           colorClass = 'text-red-600 font-bold'
         }
+
+        const activePlayersOnChar = playerCharPositions.filter((p) => p.index === index)
+
         return (
-          <span key={index} className={`${colorClass} font-mono text-base md:text-lg`}>
-            {char}
+          <span key={index} className="relative inline-flex flex-col items-center group">
+            <span className={`${colorClass} font-mono text-base md:text-lg`}>{char}</span>
+            {activePlayersOnChar.length > 0 && (
+              <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-3.5 h-[2px] bg-red-500 rounded-full shadow-sm animate-pulse" />
+            )}
           </span>
         )
       })
@@ -385,9 +403,15 @@ function BotRaceContent() {
         if (spaceIndex < inputText.length) {
           spaceColorClass = 'text-red-600 font-bold'
         }
+
+        const activePlayersOnSpace = playerCharPositions.filter((p) => p.index === spaceIndex)
+
         spaceChar = (
-          <span key={`space-${spaceIndex}`} className={`${spaceColorClass} font-mono text-base md:text-lg`}>
-            {'\u00A0'}
+          <span key={`space-${spaceIndex}`} className="relative inline-flex flex-col items-center group">
+            <span className={`${spaceColorClass} font-mono text-base md:text-lg`}>{'\u00A0'}</span>
+            {activePlayersOnSpace.length > 0 && (
+              <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-3.5 h-[2px] bg-red-500 rounded-full shadow-sm animate-pulse" />
+            )}
           </span>
         )
       }
@@ -398,8 +422,8 @@ function BotRaceContent() {
           ref={(el) => {
             wordRefs.current[wordIdx] = el
           }}
-          className={`inline-flex items-center rounded px-1 py-0.5 mx-0.5 transition-colors ${
-            isCurrentWord ? 'bg-red-100/80 outline outline-2 outline-red-500/60' : ''
+          className={`inline-flex items-center rounded px-1 py-1 mx-0.5 transition-colors ${
+            isCurrentWord ? 'bg-red-100 outline outline-2 outline-red-500/60' : ''
           }`}
         >
           {wordChars}
@@ -411,8 +435,13 @@ function BotRaceContent() {
 
   if (isLoading) {
     return (
-      <main className="min-h-screen w-screen bg-slate-50 text-slate-900 flex items-center justify-center select-none">
-        <div className="flex flex-col items-center gap-2">
+      <main className="relative min-h-screen w-screen bg-slate-900 text-slate-900 flex items-center justify-center select-none overflow-hidden">
+        {/* Background pudar */}
+        <div
+          className="absolute inset-0 bg-cover bg-center bg-no-repeat opacity-15"
+          style={{ backgroundImage: "url('/bg/bg.png')" }}
+        />
+        <div className="relative z-10 flex flex-col items-center gap-2 bg-white border border-slate-200 rounded-xl p-6">
           <div className="w-6 h-6 border-2 border-red-600 border-t-transparent rounded-full animate-spin"></div>
           <p className="text-xs font-semibold text-slate-600">Menyiapkan Arena & Soal...</p>
         </div>
@@ -421,16 +450,22 @@ function BotRaceContent() {
   }
 
   return (
-    <main className="min-h-screen w-screen bg-slate-50 text-slate-900 p-4 md:p-6 flex flex-col items-center justify-start select-none">
-      <div className="max-w-3xl w-full flex flex-col gap-3 relative">
+    <main className="relative min-h-screen w-screen bg-slate-950 text-slate-900 p-4 md:p-6 flex flex-col items-center justify-start select-none overflow-x-hidden">
+      {/* Visual Background pudar & samar */}
+      <div
+        className="absolute inset-0 bg-cover bg-center bg-no-repeat opacity-15 pointer-events-none"
+        style={{ backgroundImage: "url('/bg/bg.png')" }}
+      />
 
-        {/* Header Utama */}
-        <div className="flex items-center justify-between border-b border-slate-200 pb-3 pt-2 shrink-0">
+      <div className="relative z-10 max-w-3xl w-full flex flex-col gap-4">
+
+        {/* Card 1: Header Utama */}
+        <div className="bg-white border border-slate-200 rounded-xl p-4 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2">
             <button
               onClick={() => router.push('/')}
               title="Tinggalkan Arena"
-              className="p-1.5 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-slate-200/60 transition-colors cursor-pointer"
+              className="p-1.5 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors cursor-pointer"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M15 19l-7-7 7-7" />
@@ -445,33 +480,33 @@ function BotRaceContent() {
         </div>
 
         {/* Area Countdown */}
-        <div className="h-10 flex items-center justify-center shrink-0 my-1">
-          {gameState === 'countdown' && (
+        {gameState === 'countdown' && (
+          <div className="h-10 flex items-center justify-center shrink-0">
             <span
-              className={`text-2xl md:text-3xl font-black text-red-600 tracking-wider ${
+              className={`text-2xl md:text-3xl font-black text-red-500 tracking-wider ${
                 raceCountdown > 0 ? 'animate-pulse' : 'scale-110 transition-transform'
               }`}
             >
               {raceCountdown > 0 ? raceCountdown : 'MULAI!'}
             </span>
-          )}
-        </div>
+          </div>
+        )}
 
-        {/* Card Arena & Track Mobil */}
-        <div className="bg-transparent px-1 py-2 shrink-0 border-b border-slate-200 my-1">
+        {/* Card 2: Arena & Track Mobil */}
+        <div className="bg-white border border-slate-200 rounded-xl p-4 md:p-5 shrink-0">
           <div className="space-y-4">
             {players.map((p, index) => {
               const isMe = p.id === userId
               const progressVal = Math.min(Math.max(p.progress || 0, 0), 100)
 
               return (
-                <div key={`${p.id}-${index}`} className="relative group bg-transparent py-2 pr-2 pl-28 md:pl-36 overflow-visible">
-                  <div className="relative w-full h-1">
+                <div key={`${p.id}-${index}`} className="relative group py-2 pr-2 pl-28 md:pl-36 overflow-visible">
+                  <div className="relative w-full h-1 bg-slate-100 rounded-full">
                     <div
                       className="absolute top-1/2 -translate-x-1/2 -translate-y-1/2 transition-all duration-300 ease-linear pointer-events-none z-10 min-w-max flex items-center"
                       style={{ left: `calc(${progressVal}% * 0.95)` }}
                     >
-                      <div className="absolute -left-2 -translate-x-full flex flex-col items-end justify-center whitespace-nowrap bg-slate-50/90 px-1.5 py-0.5 rounded shadow-xs text-right">
+                      <div className="absolute -left-2 -translate-x-full flex flex-col items-end justify-center whitespace-nowrap bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded text-right">
                         <span className={`text-[10px] leading-tight font-bold flex items-center gap-1 ${isMe ? 'text-black font-extrabold' : 'text-slate-700'}`}>
                           {p.rank && (
                             <span className="px-1 py-0.5 bg-amber-400 text-slate-900 font-extrabold text-[9px] rounded font-mono">
@@ -490,7 +525,7 @@ function BotRaceContent() {
                           )}
                           {p.username}
                         </span>
-                        <span className="text-[9px] font-mono font-bold text-slate-400 leading-tight">
+                        <span className="text-[9px] font-mono font-bold text-slate-500 leading-tight">
                           {p.wpm || 0} WPM • {Math.round(progressVal)}%
                         </span>
                       </div>
@@ -511,13 +546,13 @@ function BotRaceContent() {
           </div>
         </div>
 
-        {/* Input Area / Hasil */}
+        {/* Card 3: Input Area / Hasil */}
         {!isUserFinished ? (
-          <div className="space-y-1 shrink-0 relative my-2">
+          <div className="bg-white border border-slate-200 rounded-xl p-4 md:p-5 space-y-2 shrink-0 relative">
             <div
               ref={containerRef}
               onClick={() => inputRef.current?.focus()}
-              className="px-[50%] py-4 bg-white border border-slate-200 rounded-lg overflow-x-hidden whitespace-nowrap cursor-text flex items-center leading-relaxed scroll-smooth shadow-xs"
+              className="px-[50%] py-4 bg-slate-50 border border-slate-200 rounded-lg overflow-x-hidden whitespace-nowrap cursor-text flex items-center leading-relaxed scroll-smooth"
             >
               {renderPassage()}
             </div>
@@ -542,7 +577,7 @@ function BotRaceContent() {
             />
           </div>
         ) : (
-          <div className="py-5 bg-red-50/50 border border-red-100 rounded-lg text-center space-y-4 shrink-0 my-2">
+          <div className="bg-white border border-red-200 rounded-xl p-6 text-center space-y-4 shrink-0">
             <div>
               <h2 className="text-xl font-black text-red-600">Anda Memuat Garis Finish!</h2>
               <p className="text-slate-600 text-xs mt-1">
@@ -553,7 +588,7 @@ function BotRaceContent() {
             <div className="flex items-center justify-center gap-3">
               <button
                 onClick={() => window.location.reload()}
-                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-semibold text-xs rounded-md shadow-xs transition flex items-center gap-2 cursor-pointer"
+                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-semibold text-xs rounded-md transition flex items-center gap-2 cursor-pointer"
               >
                 Balapan Ulang
                 <kbd className="px-1.5 py-0.5 text-[10px] bg-red-800 text-white rounded font-mono uppercase">R</kbd>
@@ -561,7 +596,7 @@ function BotRaceContent() {
 
               <button
                 onClick={() => router.push('/')}
-                className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 font-semibold text-xs rounded-md shadow-xs transition flex items-center gap-2 cursor-pointer"
+                className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 font-semibold text-xs rounded-md transition flex items-center gap-2 cursor-pointer"
               >
                 Tinggalkan Arena
                 <kbd className="px-1.5 py-0.5 text-[10px] bg-slate-400 text-white rounded font-mono uppercase">Esc</kbd>
@@ -579,7 +614,7 @@ export default function BotRacePage() {
   return (
     <Suspense
       fallback={
-        <div className="h-screen w-screen flex items-center justify-center bg-slate-50 text-slate-500 text-sm font-medium">
+        <div className="h-screen w-screen flex items-center justify-center bg-slate-900 text-slate-300 text-sm font-medium">
           Loading Arena...
         </div>
       }
