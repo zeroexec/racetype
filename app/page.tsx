@@ -5,24 +5,63 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import Image from 'next/image'
 import { supabase } from '@/lib/supabase'
+import ProfileModal from './modal/ProfileModal'
+import { ChevronDown, LogIn, Play, User as UserIcon, HelpCircle } from 'lucide-react'
 
 export default function Home() {
   const router = useRouter()
   const [loading, setLoading] = useState(false)
-  const [currentUser, setCurrentUser] = useState<{ id: string; name: string } | null>(null)
+  const [currentUser, setCurrentUser] = useState<{ id: string; name: string; email?: string } | null>(null)
+  
+  // State Modal Profil
+  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false)
 
-  // Cek status autentikasi/session saat halaman dimuat
+  // Cek status autentikasi/session saat halaman dimuat & listen perubahan auth
   useEffect(() => {
     const checkAuth = async () => {
       const { data: { session } } = await supabase.auth.getSession()
       if (session?.user) {
-        // Jika login, ambil nama dari metadata atau email
         const name = session.user.user_metadata?.full_name || session.user.email?.split('@')[0] || 'User'
-        setCurrentUser({ id: session.user.id, name })
+        setCurrentUser({ 
+          id: session.user.id, 
+          name, 
+          email: session.user.email 
+        })
+      } else {
+        setCurrentUser(null)
       }
     }
+
     checkAuth()
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.user) {
+        const name = session.user.user_metadata?.full_name || session.user.email?.split('@')[0] || 'User'
+        setCurrentUser({ 
+          id: session.user.id, 
+          name, 
+          email: session.user.email 
+        })
+      } else {
+        setCurrentUser(null)
+      }
+    })
+
+    return () => {
+      subscription.unsubscribe()
+    }
   }, [])
+
+  // Handle Logout dari Modal
+  const handleLogout = async () => {
+    setLoading(true)
+    await supabase.auth.signOut()
+    localStorage.removeItem('typing_race_username')
+    setCurrentUser(null)
+    setIsProfileModalOpen(false)
+    setLoading(false)
+    router.refresh()
+  }
 
   // Handle Match vs Bot
   const handleStartBotRace = () => {
@@ -58,19 +97,36 @@ export default function Home() {
           <span className="text-xs font-mono tracking-widest text-slate-400 uppercase">Server Online</span>
         </div>
 
+        {/* Jika Sudah Login -> Pil Profil Interaktif yang Memicu Modal */}
         {currentUser ? (
-          <div className="flex items-center gap-3 bg-slate-900/80 border border-slate-800 backdrop-blur-md px-4 py-2 rounded-full">
-            <div className="w-6 h-6 rounded-full bg-red-500/20 text-red-400 flex items-center justify-center text-xs font-bold">
-              {currentUser.name[0].toUpperCase()}
+          <button
+            onClick={() => setIsProfileModalOpen(true)}
+            className="group relative flex items-center gap-2.5 bg-slate-900/80 hover:bg-slate-800/90 border border-slate-800 hover:border-red-500/50 backdrop-blur-md px-3.5 py-1.5 rounded-full shadow-lg transition-all duration-200 cursor-pointer active:scale-95"
+            title="Klik untuk membuka profil"
+          >
+            {/* Avatar dengan Indikator Status */}
+            <div className="relative flex items-center justify-center">
+              <div className="w-6 h-6 rounded-full bg-red-500/20 text-red-400 border border-red-500/30 flex items-center justify-center text-xs font-bold group-hover:scale-105 transition-transform">
+                {currentUser.name[0].toUpperCase()}
+              </div>
+              <span className="absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full bg-emerald-500 border border-slate-900" />
             </div>
-            <span className="text-sm font-medium text-slate-200">{currentUser.name}</span>
-          </div>
+
+            <span className="text-xs font-semibold text-slate-200 group-hover:text-white transition-colors">
+              {currentUser.name}
+            </span>
+
+            {/* Icon Chevron sebagai petunjuk UI bahwa komponen ini dropdown/modal */}
+            <ChevronDown className="w-3.5 h-3.5 text-slate-400 group-hover:text-red-400 transition-all duration-200 group-hover:translate-y-0.5" />
+          </button>
         ) : (
+          /* Jika Belum Login -> Tombol Masuk */
           <Link
             href="/login"
-            className="px-5 py-2 text-xs font-semibold tracking-wider uppercase text-red-400 hover:text-white bg-slate-900/80 border border-red-500/30 hover:border-red-500 hover:bg-red-600/10 rounded-full backdrop-blur-md transition-all duration-300 shadow-lg shadow-red-500/5"
+            className="px-5 py-2 text-xs font-semibold tracking-wider uppercase text-red-400 hover:text-white bg-slate-900/80 border border-red-500/30 hover:border-red-500 hover:bg-red-600/10 rounded-full backdrop-blur-md transition-all duration-300 shadow-lg shadow-red-500/5 flex items-center gap-2"
           >
-            Masuk
+            <LogIn className="w-3.5 h-3.5" />
+            <span>Masuk</span>
           </Link>
         )}
       </header>
@@ -103,9 +159,7 @@ export default function Home() {
             {/* Tombol Kiri: Multiplayer (Fitur Mendatang) */}
             <div className="group relative w-full py-4 px-6 bg-slate-900/50 border border-slate-800 text-slate-500 rounded-xl flex flex-col items-center justify-center gap-1 overflow-hidden shadow-inner cursor-not-allowed backdrop-blur-sm">
               <div className="flex items-center gap-3">
-                <svg className="w-5 h-5 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
-                </svg>
+                <UserIcon className="w-5 h-5 text-slate-600" />
                 <span className="font-bold text-sm tracking-wider uppercase">Vs Player</span>
               </div>
               <span className="text-[10px] font-mono text-slate-600 tracking-wide">(Fitur Mendatang)</span>
@@ -121,21 +175,35 @@ export default function Home() {
               <div className="absolute inset-0 w-1/2 h-full bg-white/10 skew-x-12 -translate-x-full group-hover:translate-x-[300%] transition-transform duration-1000 ease-out" />
 
               <span>Mulai Balapan</span>
-              <svg className="w-5 h-5 group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M14 5l7 7m0 0l-7 7m7-7H3" />
-              </svg>
+              <Play className="w-4 h-4 fill-current group-hover:translate-x-1 transition-transform" />
             </button>
 
           </div>
 
-          {!currentUser && (
-            <p className="text-xs text-slate-500 font-mono">
-              Bermain sebagai <span className="text-slate-300 font-semibold">User (Guest)</span>
-            </p>
-          )}
+          {/* Status User Saat Ini */}
+          <p className="text-xs text-slate-500 font-mono">
+            {currentUser ? (
+              <>
+                Bertanding sebagai <span className="text-red-400 font-semibold">{currentUser.name}</span>
+              </>
+            ) : (
+              <>
+                Bermain sebagai <span className="text-slate-300 font-semibold">User (Guest)</span>
+              </>
+            )}
+          </p>
         </div>
 
       </div>
+
+      {/* Modal Profil Pengguna */}
+      <ProfileModal
+        isOpen={isProfileModalOpen}
+        onClose={() => setIsProfileModalOpen(false)}
+        user={currentUser}
+        onLogout={handleLogout}
+        loading={loading}
+      />
 
       {/* Footer Info */}
       <footer className="absolute bottom-6 text-center text-xs text-slate-600 font-mono">
