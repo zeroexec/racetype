@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useRef, Suspense } from 'react'
+import { useEffect, useState, useRef, useCallback, useMemo, Suspense } from 'react'
 import { useRouter } from 'next/navigation'
 import Image from 'next/image'
 import { supabase } from '@/lib/supabase'
@@ -33,7 +33,7 @@ const BOT_COUNT = 3
 function BotRaceContent() {
   const router = useRouter()
 
-  const [userId, setUserId] = useState<string>('')
+  const [, setUserId] = useState<string>('')
   const [, setUsername] = useState<string>('')
   const [players, setPlayers] = useState<Player[]>([])
   const [passageText, setPassageText] = useState<string>('')
@@ -54,18 +54,18 @@ function BotRaceContent() {
   const containerRef = useRef<HTMLDivElement>(null)
   const wordRefs = useRef<(HTMLSpanElement | null)[]>([])
 
-  const passageWords = passageText ? passageText.split(' ') : []
+  // Memoize kata-kata passage agar tidak di-split setiap re-render
+  const passageWords = useMemo(() => {
+    return passageText ? passageText.split(' ') : []
+  }, [passageText])
 
-  // Menentukan indeks kata yang sedang aktif dengan akurat untuk user
-  const getCurrentWordIndex = () => {
+  const currentWordIndex = useMemo(() => {
     if (!passageText || !inputText) return 0
     const slicedPassage = passageText.slice(0, inputText.length)
     return slicedPassage.split(' ').length - 1
-  }
+  }, [passageText, inputText])
 
-  const currentWordIndex = getCurrentWordIndex()
-
-  // Auto-scroll horizontal ke kata aktif user
+  // Auto-scroll horizontal ke kata aktif
   useEffect(() => {
     if (containerRef.current && wordRefs.current[currentWordIndex]) {
       const container = containerRef.current
@@ -78,9 +78,78 @@ function BotRaceContent() {
     }
   }, [currentWordIndex])
 
-  // Inisialisasi Player & Load Data dari DB
+  // Recalculate Rank (urutan garis finish)
+  const recalculateRanks = useCallback((playerList: Player[]): Player[] => {
+    const finishedPlayers = playerList
+      .filter((p) => p.isFinished && p.finishTime !== null && p.finishTime !== undefined)
+      .sort((a, b) => (a.finishTime ?? 0) - (b.finishTime ?? 0))
+
+    const rankMap = new Map<string, number>()
+    finishedPlayers.forEach((p, idx) => {
+      rankMap.set(p.id, idx + 1)
+    })
+
+    return playerList.map((p) => ({
+      ...p,
+      rank: rankMap.get(p.id) || p.rank,
+    }))
+  }, [])
+
+  // Simulasi Bot
+  const startBotSimulation = useCallback(() => {
+    if (botIntervalRef.current) clearInterval(botIntervalRef.current)
+
+    botIntervalRef.current = setInterval(() => {
+      setPlayers((prev) => {
+        let playersAllFinished = true
+        const now = Date.now()
+
+        const updated = prev.map((p) => {
+          if (!p.isBot) {
+            if (!p.isFinished) playersAllFinished = false
+            return p
+          }
+
+          if (p.isFinished) return p
+
+          const minWpm = p.minWpm || 40
+          const maxWpm = p.maxWpm || 70
+          const currentWpm = Math.floor(Math.random() * (maxWpm - minWpm + 1)) + minWpm
+
+          const totalCharacters = passageText.length || 1
+          const charsPerTick = ((currentWpm * 5) / 60) * 0.5
+          const progressIncrease = (charsPerTick / totalCharacters) * 100
+
+          const newProgress = Math.min((p.progress || 0) + progressIncrease, 100)
+          const isFinished = newProgress >= 100
+          const finishTime = isFinished ? p.finishTime ?? now : null
+
+          if (!isFinished) playersAllFinished = false
+
+          return {
+            ...p,
+            progress: Math.round(newProgress * 10) / 10,
+            wpm: currentWpm,
+            isFinished,
+            finishTime,
+          }
+        })
+
+        const rankedPlayers = recalculateRanks(updated)
+
+        if (playersAllFinished && botIntervalRef.current) {
+          clearInterval(botIntervalRef.current)
+          setGameState('finished')
+        }
+
+        return rankedPlayers
+      })
+    }, 500)
+  }, [passageText.length, recalculateRanks])
+
+  // Inisialisasi Data
   useEffect(() => {
-    const storedUserId = localStorage.getItem('typing_race_user_id') || 'guest_user'
+    const storedUserId = localStorage.getItem('typing_race_user_id') || ''
     const rawUsername = localStorage.getItem('typing_race_username') || ''
 
     let finalUsername = rawUsername
@@ -102,8 +171,8 @@ function BotRaceContent() {
       let selectedPassage = DEFAULT_PASSAGE
 
       try {
-        const { data: passageData } = await supabase.from('passages').select('content')
-        if (passageData && passageData.length > 0) {
+        const { data: passageData, error: passageErr } = await supabase.from('passages').select('content')
+        if (!passageErr && passageData && passageData.length > 0) {
           selectedPassage = passageData[Math.floor(Math.random() * passageData.length)].content
         }
       } catch (err) {
@@ -113,19 +182,17 @@ function BotRaceContent() {
 
       let dbBots: BotPreset[] | null = null
       try {
-        const { data } = await supabase.from('bots').select('*')
-        dbBots = data
+        const { data, error: botErr } = await supabase.from('bots').select('*')
+        if (!botErr && data) {
+          dbBots = data
+        }
       } catch (err) {
         console.error('Gagal mengambil bot preset dari DB, menggunakan fallback.', err)
       }
 
       let shuffledBots: BotPreset[] = []
       if (dbBots && dbBots.length > 0) {
-        shuffledBots = [...dbBots]
-        for (let i = shuffledBots.length - 1; i > 0; i--) {
-          const j = Math.floor(Math.random() * (i + 1))
-          ;[shuffledBots[i], shuffledBots[j]] = [shuffledBots[j], shuffledBots[i]]
-        }
+        shuffledBots = [...dbBots].sort(() => Math.random() - 0.5)
       }
 
       const botsList: Player[] = []
@@ -146,7 +213,7 @@ function BotRaceContent() {
 
       setPlayers([
         {
-          id: storedUserId,
+          id: storedUserId || 'guest_user',
           username: finalUsername,
           progress: 0,
           wpm: 0,
@@ -167,63 +234,47 @@ function BotRaceContent() {
     }
   }, [])
 
-  // Helper untuk menghitung ulang peringkat berdasarkan timestamp penyelesaian
-  const recalculateRanks = (playerList: Player[]): Player[] => {
-    const finishedPlayers = playerList
-      .filter((p) => p.isFinished && p.finishTime !== null && p.finishTime !== undefined)
-      .sort((a, b) => (a.finishTime ?? 0) - (b.finishTime ?? 0))
-
-    const rankMap = new Map<string, number>()
-    finishedPlayers.forEach((p, idx) => {
-      rankMap.set(p.id, idx + 1)
-    })
-
-    return playerList.map((p) => ({
-      ...p,
-      rank: rankMap.get(p.id) || p.rank,
-    }))
-  }
-
   // Timer Countdown Start
   useEffect(() => {
-    if (isLoading) return
+    if (isLoading || gameState !== 'countdown') return
 
-    if (gameState === 'countdown') {
-      if (raceCountdown > 0) {
-        const timer = setTimeout(() => setRaceCountdown((prev) => prev - 1), 1000)
-        return () => clearTimeout(timer)
-      } else {
-        const startTimer = setTimeout(() => {
+    const timer = setInterval(() => {
+      setRaceCountdown((prev) => {
+        if (prev <= 1) {
+          clearInterval(timer)
           setGameState('racing')
           setStartTime(Date.now())
           setTimeout(() => inputRef.current?.focus(), 100)
           startBotSimulation()
-        }, 800)
-        return () => clearTimeout(startTimer)
-      }
-    }
-  }, [gameState, raceCountdown, isLoading])
+          return 0
+        }
+        return prev - 1
+      })
+    }, 1000)
 
-  // Auto-focus input saat mode racing
+    return () => clearInterval(timer)
+  }, [gameState, isLoading, startBotSimulation])
+
+  // Global Focus Handler
   useEffect(() => {
     if (gameState !== 'racing' || isUserFinished) return
-    const handleGlobalClick = () => inputRef.current?.focus()
-    window.addEventListener('click', handleGlobalClick)
-    return () => window.removeEventListener('click', handleGlobalClick)
+    const handleFocus = () => inputRef.current?.focus()
+    window.addEventListener('click', handleFocus)
+    window.addEventListener('keydown', handleFocus)
+    return () => {
+      window.removeEventListener('click', handleFocus)
+      window.removeEventListener('keydown', handleFocus)
+    }
   }, [gameState, isUserFinished])
 
-  // Shortcut Keyboard saat user sudah finish
+  // Shortcut Keyboard (Enter untuk langsung ke Halaman Pencapaian setelah Selesai)
   useEffect(() => {
     if (!isUserFinished) return
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      const key = e.key.toLowerCase()
-      if (key === 'r') {
+      if (e.key === 'Enter') {
         e.preventDefault()
-        window.location.reload()
-      } else if (key === 'l' || key === 'escape') {
-        e.preventDefault()
-        router.push('/')
+        router.push('/achievements')
       }
     }
 
@@ -231,67 +282,12 @@ function BotRaceContent() {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [isUserFinished, router])
 
-  // Simulasi Kemajuan Bot
-  const startBotSimulation = () => {
-    if (botIntervalRef.current) clearInterval(botIntervalRef.current)
-
-    botIntervalRef.current = setInterval(() => {
-      setPlayers((prev) => {
-        let playersAllFinished = true
-        const now = Date.now()
-
-        const updated = prev.map((p) => {
-          if (!p.isBot) {
-            if (!p.isFinished) playersAllFinished = false
-            return p
-          }
-
-          if (p.isFinished) return p
-
-          const minWpm = p.minWpm || 40
-          const maxWpm = p.maxWpm || 70
-          const currentWpm = Math.floor(Math.random() * (maxWpm - minWpm + 1)) + minWpm
-
-          const totalCharacters = passageText.length || 1
-          const charsPerSecond = (currentWpm * 5) / 60
-          const progressIncrease = (charsPerSecond / totalCharacters) * 100
-
-          const newProgress = Math.min((p.progress || 0) + progressIncrease, 100)
-          const isFinished = newProgress >= 100
-          const finishTime = isFinished ? p.finishTime ?? now : null
-
-          if (!isFinished) {
-            playersAllFinished = false
-          }
-
-          return {
-            ...p,
-            progress: Math.round(newProgress * 10) / 10,
-            wpm: currentWpm,
-            isFinished,
-            finishTime,
-          }
-        })
-
-        const rankedPlayers = recalculateRanks(updated)
-
-        if (playersAllFinished && botIntervalRef.current) {
-          clearInterval(botIntervalRef.current)
-          setGameState('finished')
-        }
-
-        return rankedPlayers
-      })
-    }, 1000)
-  }
-
   const handleKeyDownInput = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Backspace') {
       e.preventDefault()
     }
   }
 
-  // Pengolahan Input Ketikan User
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (gameState !== 'racing' || isUserFinished) return
 
@@ -316,37 +312,36 @@ function BotRaceContent() {
 
       let currentWpm = 0
       if (startTime) {
-        const timeInMinutes = (now - startTime) / 60000
-        currentWpm = timeInMinutes > 0 ? Math.round(updatedText.length / 5 / timeInMinutes) : 0
+        const timeInMinutes = Math.max((now - startTime) / 60000, 0.001)
+        currentWpm = Math.round(updatedText.length / 5 / timeInMinutes)
       }
 
       setMyWpm(currentWpm)
-
-      if (isFinished) {
-        setIsUserFinished(true)
-      }
 
       setPlayers((prev) => {
         let playersAllFinished = true
 
         const nextPlayers = prev.map((p) => {
-          if (p.id !== userId) {
-            if (!p.isFinished) playersAllFinished = false
-            return p
+          if (!p.isBot) {
+            if (!isFinished) playersAllFinished = false
+            return {
+              ...p,
+              progress,
+              wpm: currentWpm,
+              isFinished,
+              finishTime: isFinished ? p.finishTime ?? now : null,
+            }
           }
 
-          if (!isFinished) playersAllFinished = false
-
-          return {
-            ...p,
-            progress,
-            wpm: currentWpm,
-            isFinished,
-            finishTime: isFinished ? p.finishTime ?? now : null,
-          }
+          if (!p.isFinished) playersAllFinished = false
+          return p
         })
 
         const rankedPlayers = recalculateRanks(nextPlayers)
+
+        if (isFinished) {
+          setIsUserFinished(true)
+        }
 
         if (playersAllFinished && botIntervalRef.current) {
           clearInterval(botIntervalRef.current)
@@ -360,7 +355,6 @@ function BotRaceContent() {
     }
   }
 
-  // Peta indeks karakter aktif untuk semua pemain (user + bot)
   const playerCharPositions = players.map((p) => {
     if (!p.isBot) {
       return { id: p.id, index: inputText.length, isMe: true }
@@ -372,13 +366,15 @@ function BotRaceContent() {
     return { id: p.id, index: charIdx, isMe: false }
   })
 
-  // Rendering Teks Lintasan Ketik dengan Garis Tipis Indikator Posisi
   const renderPassage = () => {
+    wordRefs.current = []
     let globalCharIndex = 0
+
     return passageWords.map((word, wordIdx) => {
       const isCurrentWord = wordIdx === currentWordIndex
       const wordChars = word.split('').map((char) => {
         const index = globalCharIndex++
+
         let colorClass = 'text-slate-400'
         if (index < inputText.length) {
           colorClass = 'text-red-600 font-bold'
@@ -390,7 +386,7 @@ function BotRaceContent() {
           <span key={index} className="relative inline-flex flex-col items-center group">
             <span className={`${colorClass} font-mono text-base md:text-lg`}>{char}</span>
             {activePlayersOnChar.length > 0 && (
-              <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-3.5 h-[2px] bg-red-500 rounded-full shadow-sm animate-pulse" />
+              <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-3.5 h-[2px] bg-slate-300 rounded-full shadow-sm animate-pulse" />
             )}
           </span>
         )
@@ -399,6 +395,7 @@ function BotRaceContent() {
       let spaceChar = null
       if (wordIdx < passageWords.length - 1) {
         const spaceIndex = globalCharIndex++
+
         let spaceColorClass = 'text-slate-400'
         if (spaceIndex < inputText.length) {
           spaceColorClass = 'text-red-600 font-bold'
@@ -410,7 +407,7 @@ function BotRaceContent() {
           <span key={`space-${spaceIndex}`} className="relative inline-flex flex-col items-center group">
             <span className={`${spaceColorClass} font-mono text-base md:text-lg`}>{'\u00A0'}</span>
             {activePlayersOnSpace.length > 0 && (
-              <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-3.5 h-[2px] bg-red-500 rounded-full shadow-sm animate-pulse" />
+              <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-3.5 h-[2px] bg-slate-300 rounded-full shadow-sm animate-pulse" />
             )}
           </span>
         )
@@ -436,7 +433,6 @@ function BotRaceContent() {
   if (isLoading) {
     return (
       <main className="relative min-h-screen w-screen bg-slate-900 text-slate-900 flex items-center justify-center select-none overflow-hidden">
-        {/* Background pudar */}
         <div
           className="absolute inset-0 bg-cover bg-center bg-no-repeat opacity-15"
           style={{ backgroundImage: "url('/bg/bg.png')" }}
@@ -449,17 +445,18 @@ function BotRaceContent() {
     )
   }
 
+  const myRankPosition = players.find((p) => !p.isBot)?.rank || 4
+  const totalWords = passageWords.length
+
   return (
     <main className="relative min-h-screen w-screen bg-slate-950 text-slate-900 p-4 md:p-6 flex flex-col items-center justify-start select-none overflow-x-hidden">
-      {/* Visual Background pudar & samar */}
       <div
         className="absolute inset-0 bg-cover bg-center bg-no-repeat opacity-15 pointer-events-none"
         style={{ backgroundImage: "url('/bg/bg.png')" }}
       />
 
       <div className="relative z-10 max-w-3xl w-full flex flex-col gap-4">
-
-        {/* Card 1: Header Utama */}
+        {/* Header */}
         <div className="bg-white border border-slate-200 rounded-xl p-4 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2">
             <button
@@ -479,7 +476,7 @@ function BotRaceContent() {
           </div>
         </div>
 
-        {/* Area Countdown */}
+        {/* Countdown */}
         {gameState === 'countdown' && (
           <div className="h-10 flex items-center justify-center shrink-0">
             <span
@@ -492,11 +489,11 @@ function BotRaceContent() {
           </div>
         )}
 
-        {/* Card 2: Arena & Track Mobil */}
+        {/* Track Mobil */}
         <div className="bg-white border border-slate-200 rounded-xl p-4 md:p-5 shrink-0">
           <div className="space-y-4">
             {players.map((p, index) => {
-              const isMe = p.id === userId
+              const isMe = !p.isBot
               const progressVal = Math.min(Math.max(p.progress || 0, 0), 100)
 
               return (
@@ -535,6 +532,7 @@ function BotRaceContent() {
                         alt="Mobil Balap"
                         width={80}
                         height={50}
+                        style={{ height: 'auto' }}
                         className="object-contain"
                         priority={index === 0}
                       />
@@ -546,65 +544,87 @@ function BotRaceContent() {
           </div>
         </div>
 
-        {/* Card 3: Input Area / Hasil */}
-        {!isUserFinished ? (
-          <div className="bg-white border border-slate-200 rounded-xl p-4 md:p-5 space-y-2 shrink-0 relative">
-            <div
-              ref={containerRef}
-              onClick={() => inputRef.current?.focus()}
-              className="px-[50%] py-4 bg-slate-50 border border-slate-200 rounded-lg overflow-x-hidden whitespace-nowrap cursor-text flex items-center leading-relaxed scroll-smooth"
-            >
-              {renderPassage()}
-            </div>
-
-            <div className="h-4 flex items-center justify-center">
-              {isError && (
-                <span className="text-xs font-semibold text-red-500 transition-opacity duration-150">
-                  Huruf Salah
-                </span>
-              )}
-            </div>
-
-            <input
-              ref={inputRef}
-              type="text"
-              value={inputText}
-              onKeyDown={handleKeyDownInput}
-              onChange={handleInputChange}
-              disabled={gameState !== 'racing' || isUserFinished}
-              className="opacity-0 pointer-events-none absolute -z-10"
-              autoFocus
-            />
+        {/* Input Text Area */}
+        <div className="bg-white border border-slate-200 rounded-xl p-4 md:p-5 space-y-2 shrink-0 relative">
+          <div
+            ref={containerRef}
+            onClick={() => inputRef.current?.focus()}
+            className="px-[50%] py-4 bg-slate-50 border border-slate-200 rounded-lg overflow-x-hidden whitespace-nowrap cursor-text flex items-center leading-relaxed scroll-smooth"
+          >
+            {renderPassage()}
           </div>
-        ) : (
-          <div className="bg-white border border-red-200 rounded-xl p-6 text-center space-y-4 shrink-0">
-            <div>
-              <h2 className="text-xl font-black text-red-600">Anda Memuat Garis Finish!</h2>
-              <p className="text-slate-600 text-xs mt-1">
-                Kecepatan akhir Anda: <span className="font-mono font-bold text-slate-900">{myWpm} WPM</span>
-              </p>
+
+          <div className="h-4 flex items-center justify-center">
+            {isError && (
+              <span className="text-xs font-semibold text-slate-400 transition-opacity duration-150">
+                Huruf Salah
+              </span>
+            )}
+          </div>
+
+          <input
+            ref={inputRef}
+            type="text"
+            value={inputText}
+            onKeyDown={handleKeyDownInput}
+            onChange={handleInputChange}
+            disabled={gameState !== 'racing' || isUserFinished}
+            className="opacity-0 pointer-events-none absolute -z-10"
+            autoFocus
+          />
+        </div>
+
+        {/* Inline Hasil Balapan */}
+        {isUserFinished && (
+          <div className="bg-white border border-slate-200 rounded-xl p-5 flex flex-col md:flex-row items-center justify-between gap-4 animate-in fade-in slide-in-from-bottom-3 duration-300">
+            <div className="flex flex-wrap items-center gap-x-6 gap-y-2 w-full md:w-auto">
+              <div>
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Posisi Finish</span>
+                <p className="text-xl font-black text-slate-900 font-mono">
+                  Juara <span className="text-red-600">#{myRankPosition}</span>
+                </p>
+              </div>
+
+              <div>
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Kecepatan</span>
+                <p className="text-xl font-black text-slate-900 font-mono">
+                  {myWpm} <span className="text-xs font-semibold text-slate-500">WPM</span>
+                </p>
+              </div>
+
+              <div>
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Kata Tersetel</span>
+                <p className="text-xl font-black text-slate-900 font-mono">
+                  {totalWords} <span className="text-xs font-semibold text-slate-500">Kata</span>
+                </p>
+              </div>
+
+              <div>
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Status</span>
+                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-emerald-100 text-emerald-800">
+                  Selesai 100%
+                </span>
+              </div>
             </div>
 
-            <div className="flex items-center justify-center gap-3">
+            <div className="flex items-center justify-end w-full md:w-auto border-t md:border-t-0 pt-3 md:pt-0 border-slate-100">
               <button
-                onClick={() => window.location.reload()}
-                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-semibold text-xs rounded-md transition flex items-center gap-2 cursor-pointer"
+                onClick={() => router.push('/achievements')}
+                className="w-full md:w-auto px-6 py-2.5 rounded-lg text-xs font-bold text-white bg-red-600 hover:bg-red-700 transition-colors flex items-center justify-between md:justify-center gap-3 cursor-pointer shadow-sm"
               >
-                Balapan Ulang
-                <kbd className="px-1.5 py-0.5 text-[10px] bg-red-800 text-white rounded font-mono uppercase">R</kbd>
-              </button>
-
-              <button
-                onClick={() => router.push('/')}
-                className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 font-semibold text-xs rounded-md transition flex items-center gap-2 cursor-pointer"
-              >
-                Tinggalkan Arena
-                <kbd className="px-1.5 py-0.5 text-[10px] bg-slate-400 text-white rounded font-mono uppercase">Esc</kbd>
+                <div className="flex items-center gap-2">
+                  <span>Berikutnya</span>
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                  </svg>
+                </div>
+                <kbd className="px-1.5 py-0.5 text-[10px] font-mono font-semibold text-red-600 bg-white border border-red-200 rounded shadow-2xs">
+                  ENTER
+                </kbd>
               </button>
             </div>
           </div>
         )}
-
       </div>
     </main>
   )
