@@ -25,6 +25,11 @@ interface BotPreset {
   max_wpm?: number
 }
 
+interface RewardResult {
+  earnedPoints: number
+  earnedCoins: number
+}
+
 const DEFAULT_PASSAGE =
   'Teknologi informasi berkembang sangat pesat dalam beberapa dekade terakhir. Kecepatan dan ketepatan dalam mengetik menjadi salah satu keahlian dasar yang sangat berguna di era digital saat ini.'
 
@@ -33,7 +38,7 @@ const BOT_COUNT = 3
 function BotRaceContent() {
   const router = useRouter()
 
-  const [, setUserId] = useState<string>('')
+  const [userId, setUserId] = useState<string>('')
   const [, setUsername] = useState<string>('')
   const [players, setPlayers] = useState<Player[]>([])
   const [passageText, setPassageText] = useState<string>('')
@@ -48,8 +53,14 @@ function BotRaceContent() {
   const [myWpm, setMyWpm] = useState<number>(0)
   const [isUserFinished, setIsUserFinished] = useState<boolean>(false)
 
+  // State untuk menyimpan total hadiah & status simpan
+  const [rewards, setRewards] = useState<RewardResult | null>(null)
+  const [isSavingRewards, setIsSavingRewards] = useState<boolean>(false)
+  const [saveStatusText, setSaveStatusText] = useState<string>('')
+
   const inputRef = useRef<HTMLInputElement>(null)
   const botIntervalRef = useRef<NodeJS.Timeout | null>(null)
+  const rewardSavedRef = useRef<boolean>(false) // Mencegah double claim/save
 
   const containerRef = useRef<HTMLDivElement>(null)
   const wordRefs = useRef<(HTMLSpanElement | null)[]>([])
@@ -94,6 +105,100 @@ function BotRaceContent() {
       rank: rankMap.get(p.id) || p.rank,
     }))
   }, [])
+
+  // Kalkulasi & Simpan Hadiah ke Supabase Database
+  const calculateAndSaveRewards = useCallback(
+    async (finalRank: number, finalWpm: number, currentUserId: string) => {
+      if (rewardSavedRef.current) return
+      rewardSavedRef.current = true
+      setIsSavingRewards(true)
+      setSaveStatusText('Menyimpan perolehan poin & koin...')
+
+      // 1. Logika Hadiah Poin & Koin
+      let basePoints = 5
+      let baseCoins = 2
+
+      if (finalRank === 1) {
+        basePoints = 30
+        baseCoins = 15
+      } else if (finalRank === 2) {
+        basePoints = 20
+        baseCoins = 10
+      } else if (finalRank === 3) {
+        basePoints = 10
+        baseCoins = 5
+      }
+
+      // Bonus berbasis WPM
+      const wpmBonusPoints = Math.floor(finalWpm * 0.5)
+      const wpmBonusCoins = Math.floor(finalWpm * 0.2)
+
+      const earnedPoints = basePoints + wpmBonusPoints
+      const earnedCoins = baseCoins + wpmBonusCoins
+
+      setRewards({ earnedPoints, earnedCoins })
+
+      // 2. Ambil ID User dari Supabase Auth jika currentUserId dari state kosong
+      let targetUserId = currentUserId
+      if (!targetUserId || targetUserId === 'guest_user') {
+        const { data: authData } = await supabase.auth.getUser()
+        if (authData?.user) {
+          targetUserId = authData.user.id
+        }
+      }
+
+      // 3. Simpan Perubahan ke Supabase jika User Terdaftar
+      if (targetUserId && targetUserId !== 'guest_user') {
+        try {
+          // Ambil profil user saat ini
+          const { data: profileData, error: fetchErr } = await supabase
+            .from('profiles')
+            .select('total_points, coins')
+            .eq('id', targetUserId)
+            .maybeSingle()
+
+          if (fetchErr) {
+            console.error('Fetch Error:', fetchErr)
+            setSaveStatusText('Gagal membaca profil pengguna.')
+            setIsSavingRewards(false)
+            return
+          }
+
+          const currentTotalPoints = profileData?.total_points ?? 0
+          const currentCoins = profileData?.coins ?? 0
+
+          const newTotalPoints = currentTotalPoints + earnedPoints
+          const newCoins = currentCoins + earnedCoins
+
+          // Perbarui poin, koin, dan waktu balapan terakhir
+          const { error: updateErr } = await supabase
+            .from('profiles')
+            .update({
+              total_points: newTotalPoints,
+              coins: newCoins,
+              last_raced_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', targetUserId)
+
+          if (updateErr) {
+            console.error('Update Error:', updateErr)
+            setSaveStatusText('Gagal menyimpan hadiah ke database.')
+          } else {
+            setSaveStatusText('Poin & koin berhasil ditambahkan!')
+          }
+        } catch (err) {
+          console.error('Gagal memperbarui koin dan poin ke database:', err)
+          setSaveStatusText('Terjadi kesalahan saat menyimpan hadiah.')
+        }
+      } else {
+        setSaveStatusText('Mode Tamu: Poin & koin tidak disimpan.')
+      }
+
+      setIsSavingRewards(false)
+    },
+    []
+  )
 
   // Simulasi Bot
   const startBotSimulation = useCallback(() => {
@@ -147,27 +252,35 @@ function BotRaceContent() {
     }, 500)
   }, [passageText.length, recalculateRanks])
 
-  // Inisialisasi Data
+  // Inisialisasi Data User & Sesi
   useEffect(() => {
-    const storedUserId = localStorage.getItem('typing_race_user_id') || ''
-    const rawUsername = localStorage.getItem('typing_race_username') || ''
-
-    let finalUsername = rawUsername
-    if (
-      !rawUsername ||
-      rawUsername.trim() === '' ||
-      rawUsername === 'guest_user' ||
-      rawUsername === 'Player Solo' ||
-      rawUsername.toLowerCase() === 'user'
-    ) {
-      finalUsername = 'user (kamu)'
-    }
-
-    setUserId(storedUserId)
-    setUsername(finalUsername)
-
     const initRace = async () => {
       setIsLoading(true)
+
+      // Sync Supabase Auth User ID
+      let currentAuthUserId = ''
+      const { data: authData } = await supabase.auth.getUser()
+      if (authData?.user) {
+        currentAuthUserId = authData.user.id
+      }
+
+      const storedUserId = currentAuthUserId || localStorage.getItem('typing_race_user_id') || ''
+      const rawUsername = localStorage.getItem('typing_race_username') || ''
+
+      let finalUsername = rawUsername
+      if (
+        !rawUsername ||
+        rawUsername.trim() === '' ||
+        rawUsername === 'guest_user' ||
+        rawUsername === 'Player Solo' ||
+        rawUsername.toLowerCase() === 'user'
+      ) {
+        finalUsername = 'user (kamu)'
+      }
+
+      setUserId(storedUserId)
+      setUsername(finalUsername)
+
       let selectedPassage = DEFAULT_PASSAGE
 
       try {
@@ -267,9 +380,9 @@ function BotRaceContent() {
     }
   }, [gameState, isUserFinished])
 
-  // Shortcut Keyboard (Enter untuk langsung ke Halaman Pencapaian setelah Selesai)
+  // Shortcut Keyboard (Enter untuk langsung ke Halaman Achievements)
   useEffect(() => {
-    if (!isUserFinished) return
+    if (!isUserFinished || isSavingRewards) return
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Enter') {
@@ -280,7 +393,7 @@ function BotRaceContent() {
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [isUserFinished, router])
+  }, [isUserFinished, isSavingRewards, router])
 
   const handleKeyDownInput = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Backspace') {
@@ -341,6 +454,9 @@ function BotRaceContent() {
 
         if (isFinished) {
           setIsUserFinished(true)
+          const myPlayer = rankedPlayers.find((p) => !p.isBot)
+          const finalRank = myPlayer?.rank || 4
+          calculateAndSaveRewards(finalRank, currentWpm, userId)
         }
 
         if (playersAllFinished && botIntervalRef.current) {
@@ -574,10 +690,11 @@ function BotRaceContent() {
           />
         </div>
 
-        {/* Inline Hasil Balapan */}
+        {/* Inline Hasil Balapan & Hadiah */}
         {isUserFinished && (
-          <div className="bg-white border border-slate-200 rounded-xl p-5 flex flex-col md:flex-row items-center justify-between gap-4 animate-in fade-in slide-in-from-bottom-3 duration-300">
-            <div className="flex flex-wrap items-center gap-x-6 gap-y-2 w-full md:w-auto">
+          <div className="bg-white border border-slate-200 rounded-xl p-5 flex flex-col items-center gap-4 animate-in fade-in slide-in-from-bottom-3 duration-300">
+            {/* Row Detail Statistik */}
+            <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3 w-full border-b border-slate-100 pb-4">
               <div>
                 <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Posisi Finish</span>
                 <p className="text-xl font-black text-slate-900 font-mono">
@@ -599,28 +716,64 @@ function BotRaceContent() {
                 </p>
               </div>
 
-              <div>
-                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Status</span>
-                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-emerald-100 text-emerald-800">
-                  Selesai 100%
-                </span>
+              {/* Hadiah Poin & Koin */}
+              <div className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 flex items-center gap-4">
+                <div>
+                  <span className="text-[9px] font-bold text-slate-400 uppercase block">Poin Perolehan</span>
+                  <p className="text-base font-black text-blue-600 font-mono leading-none">
+                    +{rewards?.earnedPoints ?? 0}
+                  </p>
+                </div>
+                <div className="h-6 w-[1px] bg-slate-200" />
+                <div>
+                  <span className="text-[9px] font-bold text-slate-400 uppercase block">Koin Perolehan</span>
+                  <p className="text-base font-black text-amber-500 font-mono leading-none">
+                    +{rewards?.earnedCoins ?? 0} 🪙
+                  </p>
+                </div>
               </div>
             </div>
 
-            <div className="flex items-center justify-end w-full md:w-auto border-t md:border-t-0 pt-3 md:pt-0 border-slate-100">
+            {/* Row Tombol Aksi & Keterangan Status */}
+            <div className="flex items-center justify-between w-full gap-4">
+              <div className="flex items-center gap-2">
+                {isSavingRewards && (
+                  <div className="w-3.5 h-3.5 border-2 border-red-600 border-t-transparent rounded-full animate-spin shrink-0" />
+                )}
+                <span className="text-xs font-medium text-slate-500">
+                  {saveStatusText}
+                </span>
+              </div>
+
               <button
                 onClick={() => router.push('/achievements')}
-                className="w-full md:w-auto px-6 py-2.5 rounded-lg text-xs font-bold text-white bg-red-600 hover:bg-red-700 transition-colors flex items-center justify-between md:justify-center gap-3 cursor-pointer shadow-sm"
+                disabled={isSavingRewards}
+                className={`px-6 py-2.5 rounded-lg text-xs font-bold text-white transition-all flex items-center justify-center gap-3 shadow-sm ${
+                  isSavingRewards
+                    ? 'bg-red-400 cursor-not-allowed opacity-70'
+                    : 'bg-red-600 hover:bg-red-700 cursor-pointer'
+                }`}
               >
                 <div className="flex items-center gap-2">
-                  <span>Berikutnya</span>
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M13 7l5 5m0 0l-5 5m5-5H6" />
-                  </svg>
+                  {isSavingRewards ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      <span>Menyimpan...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>Berikutnya</span>
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                      </svg>
+                    </>
+                  )}
                 </div>
-                <kbd className="px-1.5 py-0.5 text-[10px] font-mono font-semibold text-red-600 bg-white border border-red-200 rounded shadow-2xs">
-                  ENTER
-                </kbd>
+                {!isSavingRewards && (
+                  <kbd className="px-1.5 py-0.5 text-[10px] font-mono font-semibold text-red-600 bg-white border border-red-200 rounded shadow-2xs">
+                    ENTER
+                  </kbd>
+                )}
               </button>
             </div>
           </div>

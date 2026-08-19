@@ -7,28 +7,27 @@ import { supabase } from '@/lib/supabase'
 
 interface UserStats {
   username: string
-  rank: string
-  points: number
-  totalRaces: number
-  wins: number
-  avgWpm: number
-  maxWpm: number
-  accuracy: number
+  rankName: string
+  rankImageUrl: string
+  selectedCarUrl: string
+  totalPoints: number
+  previousPoints: number
+  coins: number
 }
 
 function AchievementsContent() {
   const router = useRouter()
   const [stats, setStats] = useState<UserStats>({
     username: 'Pemain',
-    rank: 'Gold Racer',
-    points: 1250,
-    totalRaces: 24,
-    wins: 18,
-    avgWpm: 68,
-    maxWpm: 92,
-    accuracy: 98,
+    rankName: 'Warrior',
+    rankImageUrl: 'https://eepyxtqqnhfxppwizaax.supabase.co/storage/v1/object/public/rank/01_warrior.jpg',
+    selectedCarUrl: 'https://eepyxtqqnhfxppwizaax.supabase.co/storage/v1/object/public/cars/01_car.png',
+    totalPoints: 0,
+    previousPoints: 0,
+    coins: 0,
   })
   const [isLoading, setIsLoading] = useState<boolean>(true)
+  const [isPointsUnread, setIsPointsUnread] = useState<boolean>(false)
 
   // Function Navigasi
   const handleGoLobby = () => {
@@ -87,19 +86,33 @@ function AchievementsContent() {
           if (!error && data) {
             setStats({
               username: data.username || finalUsername,
-              rank: data.rank || 'Gold Racer',
-              points: data.points ?? 1250,
-              totalRaces: data.total_races ?? 24,
-              wins: data.wins ?? 18,
-              avgWpm: data.avg_wpm ?? 68,
-              maxWpm: data.max_wpm ?? 92,
-              accuracy: data.accuracy ?? 98,
+              rankName: data.rank_name || 'Warrior',
+              rankImageUrl:
+                data.rank_image_url ||
+                'https://eepyxtqqnhfxppwizaax.supabase.co/storage/v1/object/public/rank/01_warrior.jpg',
+              selectedCarUrl:
+                data.selected_car ||
+                'https://eepyxtqqnhfxppwizaax.supabase.co/storage/v1/object/public/cars/01_car.png',
+              totalPoints: data.total_points ?? 0,
+              previousPoints: data.previous_points ?? 0,
+              coins: data.coins ?? 0,
             })
+
+            // Cek status is_points_read
+            if (data.is_points_read === false) {
+              setIsPointsUnread(true)
+
+              // Update status is_points_read menjadi true
+              await supabase
+                .from('profiles')
+                .update({ is_points_read: true })
+                .eq('id', storedUserId)
+            }
           } else {
             setStats((prev) => ({ ...prev, username: finalUsername }))
           }
         } catch (err) {
-          console.error('Gagal mengambil statistik pencapaian dari database:', err)
+          console.error('Gagal mengambil statistik pencapaian:', err)
           setStats((prev) => ({ ...prev, username: finalUsername }))
         }
       } else {
@@ -114,115 +127,124 @@ function AchievementsContent() {
 
   if (isLoading) {
     return (
-      <main className="relative min-h-screen w-screen bg-slate-900 text-slate-900 flex items-center justify-center select-none overflow-hidden">
+      <main className="relative min-h-screen w-screen bg-slate-950 text-slate-100 flex items-center justify-center select-none overflow-hidden">
         <div
           className="absolute inset-0 bg-cover bg-center bg-no-repeat opacity-15"
           style={{ backgroundImage: "url('/bg/bg.png')" }}
         />
-        <div className="relative z-10 flex flex-col items-center gap-2 bg-white border border-slate-200 rounded-xl p-6">
-          <div className="w-6 h-6 border-2 border-red-600 border-t-transparent rounded-full animate-spin"></div>
-          <p className="text-xs font-semibold text-slate-600">Memuat Pencapaian...</p>
+        <div className="relative z-10 flex flex-col items-center gap-2">
+          <div className="w-6 h-6 border-2 border-red-500 border-t-transparent rounded-full animate-spin"></div>
+          <p className="text-xs font-semibold text-slate-400">Memuat Pencapaian...</p>
         </div>
       </main>
     )
   }
 
+  // Kalkulasi persentase bar garis poin
+  const gainedPoints = stats.totalPoints - stats.previousPoints
+  const targetNextPoints = Math.max(stats.totalPoints, 100)
+  const progressPercent = Math.min(
+    100,
+    Math.max(0, Math.round((stats.totalPoints / targetNextPoints) * 100))
+  )
+
   return (
-    <main className="relative min-h-screen w-screen bg-slate-950 text-slate-900 p-4 md:p-6 flex flex-col items-center justify-center select-none overflow-x-hidden">
+    <main className="relative min-h-screen w-screen bg-slate-950 text-slate-100 p-4 md:p-6 flex flex-col items-center justify-center select-none overflow-x-hidden">
       {/* Background Overlay */}
       <div
         className="absolute inset-0 bg-cover bg-center bg-no-repeat opacity-15 pointer-events-none"
         style={{ backgroundImage: "url('/bg/bg.png')" }}
       />
 
-      <div className="relative z-10 max-w-2xl w-full flex flex-col gap-4">
-        {/* Header Status Card */}
-        <div className="bg-white border border-slate-200 rounded-xl p-5 md:p-6 flex flex-col md:flex-row items-center justify-between gap-4 shadow-sm">
-          <div className="flex items-center gap-4">
-            {/* Rank Badge / Image Icon */}
-            <div className="relative w-16 h-16 md:w-20 md:h-20 bg-amber-50 rounded-xl border border-amber-200 flex items-center justify-center shrink-0">
-              <Image
-                src="/car/car.png"
-                alt="Rank Badge"
-                width={64}
-                height={40}
-                className="object-contain drop-shadow-md"
-              />
-            </div>
+      {/* CONTAINER TANPA BINGKAI */}
+      <div className="relative z-10 max-w-lg w-full flex flex-col items-center px-4">
+        
+        {/* 1. Koin di Pojok Kanan Atas */}
+        <div className="absolute top-0 right-4 flex items-center gap-1.5 bg-amber-500/10 px-3 py-1 rounded-full">
+          <span className="text-amber-400 font-bold text-xs">🪙</span>
+          <span className="font-mono font-black text-xs text-amber-400">
+            {stats.coins.toLocaleString('id-ID')}
+          </span>
+        </div>
 
-            <div className="flex flex-col text-center md:text-left">
-              <div className="flex items-center justify-center md:justify-start gap-2">
-                <span className="px-2 py-0.5 bg-amber-400 text-slate-900 font-extrabold text-[10px] rounded font-mono uppercase tracking-wider">
-                  {stats.rank}
+        {/* 2. Gambar Rank Besar di Tengah Atas & Nama Rank */}
+        <div className="flex flex-col items-center mt-6">
+          <div className="relative w-28 h-28 md:w-36 md:h-36 flex items-center justify-center">
+            <Image
+              src={stats.rankImageUrl}
+              alt={stats.rankName}
+              width={128}
+              height={128}
+              className="object-contain drop-shadow-[0_0_15px_rgba(255,255,255,0.15)]"
+            />
+          </div>
+          <span className="mt-3 px-3 py-1 bg-amber-400/20 text-amber-300 font-extrabold text-xs rounded-md font-mono uppercase tracking-wider">
+            {stats.rankName}
+          </span>
+        </div>
+
+        {/* 3. Baris Mobil Selected (Kiri) & Nama Player (Kanan) */}
+        <div className="w-full mt-8 flex items-center justify-between gap-4">
+          {/* Foto Mobil Selected (Kiri) */}
+          <div className="relative w-20 h-12 flex items-center justify-center shrink-0">
+            <Image
+              src={stats.selectedCarUrl}
+              alt="Mobil Terpilih"
+              width={70}
+              height={36}
+              className="object-contain drop-shadow"
+            />
+          </div>
+
+          {/* Nama Player (Kanan) */}
+          <div className="flex flex-col text-right">
+            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+              Pemain
+            </span>
+            <h2 className="text-lg md:text-xl font-black text-slate-100 leading-tight truncate max-w-[200px]">
+              {stats.username}
+            </h2>
+          </div>
+        </div>
+
+        {/* 4. Indikator Garis Poin Sebelumnya dan Poin Saat Ini */}
+        <div className="w-full mt-6 flex flex-col gap-2">
+          <div className="flex items-center justify-between text-xs font-bold">
+            <div className="flex items-center gap-1 text-slate-400">
+              <span>Sebelumnya:</span>
+              <span className="font-mono text-slate-300">{stats.previousPoints.toLocaleString('id-ID')} PTS</span>
+            </div>
+            <div className="flex items-center gap-1 text-red-400 font-mono">
+              <span>Saat ini:</span>
+              <span className="text-sm font-black">{stats.totalPoints.toLocaleString('id-ID')} PTS</span>
+              {gainedPoints > 0 && (
+                <span className="text-[10px] bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded font-sans">
+                  +{gainedPoints}
                 </span>
-              </div>
-              <h1 className="text-xl md:text-2xl font-black text-slate-900 mt-1 leading-tight">
-                {stats.username}
-              </h1>
-              <p className="text-xs font-semibold text-slate-500 mt-0.5">
-                Peringkat Balapan Utama
-              </p>
+              )}
             </div>
           </div>
 
-          {/* Point Counter */}
-          <div className="bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 text-center md:text-right w-full md:w-auto">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
-              Total Poin
-            </span>
-            <p className="text-2xl font-black text-red-600 font-mono leading-none mt-1">
-              {stats.points.toLocaleString('id-ID')}{' '}
-              <span className="text-xs font-bold text-slate-600">PTS</span>
-            </p>
+          {/* Progress Bar Garis */}
+          <div
+            className={`relative w-full h-2.5 bg-slate-800 rounded-full overflow-hidden transition-all ${
+              isPointsUnread ? 'ring-2 ring-red-500/50 animate-pulse' : ''
+            }`}
+          >
+            <div
+              className="h-full bg-gradient-to-r from-amber-500 to-red-500 rounded-full transition-all duration-700 ease-out"
+              style={{ width: `${progressPercent}%` }}
+            />
           </div>
         </div>
 
-        {/* Grid Stats / Pencapaian */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <div className="bg-white border border-slate-200 rounded-xl p-4 flex flex-col justify-between">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-              Total Balapan
-            </span>
-            <p className="text-xl md:text-2xl font-black text-slate-900 font-mono mt-2">
-              {stats.totalRaces}
-            </p>
-          </div>
-
-          <div className="bg-white border border-slate-200 rounded-xl p-4 flex flex-col justify-between">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-              Kemenangan
-            </span>
-            <p className="text-xl md:text-2xl font-black text-emerald-600 font-mono mt-2">
-              {stats.wins}
-            </p>
-          </div>
-
-          <div className="bg-white border border-slate-200 rounded-xl p-4 flex flex-col justify-between">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-              Rata-rata WPM
-            </span>
-            <p className="text-xl md:text-2xl font-black text-slate-900 font-mono mt-2">
-              {stats.avgWpm} <span className="text-xs font-semibold text-slate-500">WPM</span>
-            </p>
-          </div>
-
-          <div className="bg-white border border-slate-200 rounded-xl p-4 flex flex-col justify-between">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-              Kecepatan Maks
-            </span>
-            <p className="text-xl md:text-2xl font-black text-red-600 font-mono mt-2">
-              {stats.maxWpm} <span className="text-xs font-semibold text-slate-500">WPM</span>
-            </p>
-          </div>
-        </div>
-
-        {/* Navigation Action Buttons with Shortcut Indicators */}
-        <div className="bg-white border border-slate-200 rounded-xl p-4 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-sm">
+        {/* 5. Tombol Kembali ke Lobby dan Main Lagi */}
+        <div className="w-full mt-10 flex flex-col sm:flex-row items-center justify-between gap-3 pt-4">
           <button
             onClick={handleGoLobby}
-            className="w-full sm:w-1/2 px-5 py-2.5 rounded-lg text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 transition-colors flex items-center justify-between cursor-pointer"
+            className="w-full sm:w-1/2 px-4 py-2.5 rounded-xl text-xs font-bold text-slate-300 bg-slate-900 hover:bg-slate-800 transition-colors flex items-center justify-between cursor-pointer"
           >
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5">
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path
                   strokeLinecap="round"
@@ -231,18 +253,18 @@ function AchievementsContent() {
                   d="M10 19l-7-7m0 0l7-7m-7 7h18"
                 />
               </svg>
-              <span>Kembali ke Lobby</span>
+              <span>Lobby</span>
             </div>
-            <kbd className="px-1.5 py-0.5 text-[10px] font-mono font-semibold text-slate-500 bg-white border border-slate-300 rounded shadow-2xs">
+            <kbd className="px-1.5 py-0.5 text-[10px] font-mono font-semibold text-slate-400 bg-slate-800 rounded">
               ESC
             </kbd>
           </button>
 
           <button
             onClick={handlePlayAgain}
-            className="w-full sm:w-1/2 px-5 py-2.5 rounded-lg text-xs font-bold text-white bg-red-600 hover:bg-red-700 transition-colors flex items-center justify-between cursor-pointer shadow-sm"
+            className="w-full sm:w-1/2 px-4 py-2.5 rounded-xl text-xs font-bold text-white bg-red-600 hover:bg-red-500 transition-colors flex items-center justify-between cursor-pointer shadow-lg shadow-red-900/20"
           >
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5">
               <span>Main Lagi</span>
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path
@@ -253,11 +275,12 @@ function AchievementsContent() {
                 />
               </svg>
             </div>
-            <kbd className="px-1.5 py-0.5 text-[10px] font-mono font-semibold text-red-600 bg-white border border-red-200 rounded shadow-2xs">
+            <kbd className="px-1.5 py-0.5 text-[10px] font-mono font-semibold text-red-200 bg-red-700/60 rounded">
               ENTER
             </kbd>
           </button>
         </div>
+
       </div>
     </main>
   )
@@ -267,7 +290,7 @@ export default function AchievementsPage() {
   return (
     <Suspense
       fallback={
-        <div className="h-screen w-screen flex items-center justify-center bg-slate-900 text-slate-300 text-sm font-medium">
+        <div className="h-screen w-screen flex items-center justify-center bg-slate-950 text-slate-300 text-sm font-medium">
           Loading Pencapaian...
         </div>
       }
